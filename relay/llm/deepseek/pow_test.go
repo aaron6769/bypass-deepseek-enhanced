@@ -111,7 +111,7 @@ func TestDeepSeekMessageContent(t *testing.T) {
 }
 
 func TestLoadDeepSeekDataImage(t *testing.T) {
-	data, contentType, filename, err := loadDeepSeekImage("", "data:image/png;base64,aGVsbG8=")
+	data, contentType, filename, err := loadDeepSeekImage(context.Background(), "", "data:image/png;base64,aGVsbG8=")
 	if err != nil {
 		t.Fatal(err)
 	}

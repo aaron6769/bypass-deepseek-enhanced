@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"chatgpt-adapter/core/gin/model"
 	"encoding/json"
+	"fmt"
 	"github.com/iocgo/sdk/env"
 	"io"
 	"net/http"
@@ -20,15 +21,33 @@ import (
 )
 
 const (
-	ginTokens = "__tokens__"
+	ginTokens               = "__tokens__"
+	maxDeepSeekSSELineBytes = 8 << 20
 )
+
+func readDeepSeekSSELine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
+	line := make([]byte, 0, 4096)
+	for {
+		fragment, isPrefix, err := reader.ReadLine()
+		if err != nil {
+			return nil, err
+		}
+		if len(line)+len(fragment) > maxBytes {
+			return nil, fmt.Errorf("DeepSeek SSE line exceeds %d MiB", maxBytes>>20)
+		}
+		line = append(line, fragment...)
+		if !isPrefix {
+			return line, nil
+		}
+	}
+}
 
 func waitMessage(r *http.Response, cancel func(str string) bool) (content string, err error) {
 	defer r.Body.Close()
 	reader := bufio.NewReader(r.Body)
 	var dataBytes []byte
 	for {
-		dataBytes, _, err = reader.ReadLine()
+		dataBytes, err = readDeepSeekSSELine(reader, maxDeepSeekSSELineBytes)
 		if err == io.EOF {
 			break
 		}
@@ -99,7 +118,7 @@ func waitResponse(ctx *gin.Context, r *http.Response, sse bool) (content string)
 	deepseekContentPatch := false
 	deepseekFragmentType := ""
 	for {
-		dataBytes, _, err := reader.ReadLine()
+		dataBytes, err := readDeepSeekSSELine(reader, maxDeepSeekSSELineBytes)
 		if err == io.EOF {
 			break
 		}

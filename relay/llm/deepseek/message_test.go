@@ -1,6 +1,7 @@
 package deepseek
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,46 @@ import (
 	"github.com/iocgo/sdk/env"
 	"github.com/spf13/viper"
 )
+
+func TestReadDeepSeekSSELineJoinsFragmentsAndLimitsSize(t *testing.T) {
+	longLine := strings.Repeat("x", 6000)
+	reader := bufio.NewReaderSize(strings.NewReader(longLine+"\n"), 64)
+	got, err := readDeepSeekSSELine(reader, len(longLine))
+	if err != nil || string(got) != longLine {
+		t.Fatalf("readDeepSeekSSELine() length=%d err=%v", len(got), err)
+	}
+	reader = bufio.NewReaderSize(strings.NewReader(longLine+"\n"), 64)
+	if _, err = readDeepSeekSSELine(reader, len(longLine)-1); err == nil {
+		t.Fatal("oversized SSE line was accepted")
+	}
+}
+
+func TestWaitResponseKeepsLongSSELine(t *testing.T) {
+	previousEnv := env.Env
+	env.Env = &env.Environment{Viper: viper.New()}
+	defer func() { env.Env = previousEnv }()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	want := strings.Repeat("long-content-", 700)
+	stream := "data: " + `{"p":"response/content","v":` + string(mustDeepSeekJSON(t, want)) + "}\n" +
+		`data: {"p":"response/status","v":"FINISHED"}` + "\n"
+	upstream := &http.Response{Body: io.NopCloser(strings.NewReader(stream)), Header: make(http.Header)}
+
+	if got := waitResponse(ctx, upstream, false); got != want {
+		t.Fatalf("waitResponse() long content length=%d, want %d", len(got), len(want))
+	}
+}
+
+func mustDeepSeekJSON(t *testing.T, value interface{}) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
 
 func TestWaitResponseKeepsFirstFragmentAfterTitleEvent(t *testing.T) {
 	previousEnv := env.Env

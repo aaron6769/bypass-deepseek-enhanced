@@ -14,6 +14,7 @@ import (
 	"github.com/bincooo/emit.io"
 	"github.com/gin-gonic/gin"
 	"github.com/iocgo/sdk/env"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -42,11 +43,11 @@ type deepseekRequest struct {
 	SearchEnabled   bool     `json:"search_enabled"`
 }
 
-func fetch(ctx context.Context, proxied, cookie string, request deepseekRequest) (response *http.Response, err error) {
+func fetch(ctx context.Context, connection deepSeekConnection, request deepseekRequest) (response *http.Response, err error) {
 	retry := 3
 label:
 	retry--
-	powHeader, err := createPoWResponse(ctx, proxied, cookie, "/api/v0/chat/completion")
+	powHeader, err := createPoWResponse(ctx, connection, "/api/v0/chat/completion")
 	if err != nil {
 		if shouldRetryDeepSeek(err, retry) {
 			goto label
@@ -56,11 +57,11 @@ label:
 
 	response, err = emit.ClientBuilder(common.HTTPClient).
 		Context(ctx).
-		Proxies(proxied).
+		Proxies(connection.Proxied).
 		POST("https://chat.deepseek.com/api/v0/chat/completion").
 		JSONHeader().
 		Ja3().
-		Header("authorization", "Bearer "+cookie).
+		Header("authorization", "Bearer "+connection.Cookie).
 		Header("origin", "https://chat.deepseek.com").
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", userAgent).
@@ -74,6 +75,8 @@ label:
 		Body(request).
 		DoC(emit.Status(http.StatusOK), emit.IsSTREAM)
 	if err != nil {
+		closeDeepSeekResponse(response)
+		response = nil
 		if shouldRetryDeepSeek(err, retry) {
 			goto label
 		}
@@ -81,18 +84,18 @@ label:
 	return
 }
 
-func createPoWResponse(ctx context.Context, proxied, cookie, targetPath string, webProfile ...bool) (string, error) {
+func createPoWResponse(ctx context.Context, connection deepSeekConnection, targetPath string, webProfile ...bool) (string, error) {
 	powUserAgent := userAgent
 	if len(webProfile) > 0 && webProfile[0] {
 		powUserAgent = webUserAgent
 	}
 	builder := emit.ClientBuilder(common.HTTPClient).
 		Context(ctx).
-		Proxies(proxied).
+		Proxies(connection.Proxied).
 		POST("https://chat.deepseek.com/api/v0/chat/create_pow_challenge").
 		JSONHeader().
 		Ja3().
-		Header("authorization", "Bearer "+cookie).
+		Header("authorization", "Bearer "+connection.Cookie).
 		Header("origin", "https://chat.deepseek.com").
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", powUserAgent).
@@ -116,6 +119,7 @@ func createPoWResponse(ctx context.Context, proxied, cookie, targetPath string, 
 		Body(map[string]interface{}{"target_path": targetPath}).
 		DoC(emit.Status(http.StatusOK), emit.IsJSON)
 	if err != nil {
+		closeDeepSeekResponse(response)
 		return "", err
 	}
 	defer response.Body.Close()
@@ -186,14 +190,20 @@ func shouldRetryDeepSeek(err error, retry int) bool {
 	return false
 }
 
-func deleteSession(ctx *gin.Context, env *env.Environment, sessionId string) {
-	_, err := emit.ClientBuilder(common.HTTPClient).
-		Context(ctx.Request.Context()).
-		Proxies(env.GetString("server.proxied")).
+func deleteSession(connection deepSeekConnection, sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	response, err := emit.ClientBuilder(common.HTTPClient).
+		Context(ctx).
+		Proxies(connection.Proxied).
 		POST("https://chat.deepseek.com/api/v0/chat_session/delete").
 		JSONHeader().
 		Ja3().
-		Header("authorization", "Bearer "+ctx.GetString("token")).
+		Header("authorization", "Bearer "+connection.Cookie).
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", userAgent).
 		Header("accept-charset", "UTF-8").
@@ -203,12 +213,21 @@ func deleteSession(ctx *gin.Context, env *env.Environment, sessionId string) {
 		Header(elseOf(clearance != "", "cookie"), clearance).
 		Header(elseOf(lang != "", "accept-language"), lang).
 		Body(map[string]interface{}{
-			"chat_session_id": sessionId,
+			"chat_session_id": sessionID,
 		}).DoC(emit.Status(http.StatusOK), emit.IsJSON)
+	closeDeepSeekResponse(response)
 	if err != nil {
 		logger.Error(err)
 		return
 	}
+}
+
+func closeDeepSeekResponse(response *http.Response) {
+	if response == nil || response.Body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+	_ = response.Body.Close()
 }
 
 func calcAnswer(ctx context.Context, data map[string]interface{}) (num int, err error) {
@@ -281,6 +300,7 @@ retryCreateSession:
 			"character_id": nil,
 		}).DoC(emit.Status(http.StatusOK), emit.IsJSON)
 	if err != nil {
+		closeDeepSeekResponse(r)
 		var busErr emit.Error
 		if errors.As(err, &busErr) && busErr.Code == 403 {
 			_ = hookCloudflare(env)
@@ -320,10 +340,20 @@ retryCreateSession:
 		err = errors.New("create chat session failed: missing session id")
 		return
 	}
+	connection := deepSeekConnection{
+		Proxied: env.GetString("server.proxied"),
+		Cookie:  ctx.GetString("token"),
+	}
+	keepSession := false
+	defer func() {
+		if !keepSession {
+			deleteSession(connection, sessionID)
+		}
+	}()
 
 	refFileIDs := make([]string, 0, len(imageURLs))
 	if len(imageURLs) > 0 {
-		refFileIDs, err = uploadDeepSeekImages(ctx.Request.Context(), env.GetString("server.proxied"), ctx.GetString("token"), mode, imageURLs)
+		refFileIDs, err = uploadDeepSeekImages(ctx.Request.Context(), connection, mode, imageURLs)
 		if err != nil {
 			return request, err
 		}
@@ -337,6 +367,7 @@ retryCreateSession:
 		SearchEnabled:   mode.SearchEnabled,
 		Message:         prompt,
 	}
+	keepSession = true
 	return
 }
 
@@ -435,6 +466,7 @@ func hookCloudflare(env *env.Environment) error {
 		if emit.IsJSON(r) == nil {
 			logger.Error(emit.TextResponse(r))
 		}
+		closeDeepSeekResponse(r)
 		return err
 	}
 
