@@ -21,27 +21,19 @@ type api struct {
 }
 
 func (api *api) Match(ctx *gin.Context, model string) (ok bool, err error) {
-	if len(model) <= 9 || Model+"-" != model[:9] {
-		return
-	}
-
-	ok = model[9:] == "chat" || model[9:] == "reasoner"
+	_, ok = resolveDeepSeekMode(model)
 	return
 }
 
 func (api *api) Models() (slice []model.Model) {
-	slice = append(slice,
-		model.Model{
-			Id:      Model + "-chat",
-			Object:  "model",
-			Created: 1686935002,
-			By:      Model + "-adapter",
-		}, model.Model{
-			Id:      Model + "-reasoner",
+	for _, id := range deepSeekModelOrder {
+		slice = append(slice, model.Model{
+			Id:      id,
 			Object:  "model",
 			Created: 1686935002,
 			By:      Model + "-adapter",
 		})
+	}
 	return
 }
 

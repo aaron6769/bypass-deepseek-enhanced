@@ -4,6 +4,9 @@ import (
 	"chatgpt-adapter/cmd/iocgo/annotation"
 	"github.com/iocgo/sdk/gen"
 	"github.com/iocgo/sdk/gen/tool"
+	"os"
+	"path/filepath"
+	"runtime"
 )
 
 //
@@ -23,5 +26,10 @@ func init() {
 }
 
 func main() {
+	// The annotation processor invokes `go list` while running as a toolexec
+	// child. Some Go/Windows combinations narrow PATH for tool children, so make
+	// the host Go binary explicitly discoverable before processing annotations.
+	goBin := filepath.Join(runtime.GOROOT(), "bin")
+	_ = os.Setenv("PATH", goBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	tool.Process()
 }

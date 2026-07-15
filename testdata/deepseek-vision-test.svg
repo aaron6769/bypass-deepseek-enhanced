@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#f4f7ff"/>
+  <rect x="56" y="56" width="528" height="248" rx="24" fill="#ffffff" stroke="#315efb" stroke-width="8"/>
+  <circle cx="160" cy="180" r="64" fill="#ff6b6b"/>
+  <rect x="260" y="116" width="250" height="128" rx="16" fill="#315efb"/>
+  <text x="385" y="190" text-anchor="middle" dominant-baseline="middle"
+        font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#ffffff">VISION TEST 742</text>
+</svg>

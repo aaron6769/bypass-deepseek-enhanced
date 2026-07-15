@@ -78,7 +78,7 @@ func cros(gtx *gin.Context) {
 
 	uid := uuid.NewString()
 	// 请求打印
-	data, _ := httputil.DumpRequest(gtx.Request, debug)
+	data, _ := dumpRequestRedacted(gtx.Request, debug)
 	logger.Infof("------ START REQUEST %s ---------", uid)
 	println(string(data))
 
@@ -87,4 +87,15 @@ func cros(gtx *gin.Context) {
 
 	// 结束处理
 	logger.Infof("------ END REQUEST %s ---------", uid)
+}
+
+func dumpRequestRedacted(request *http.Request, body bool) ([]byte, error) {
+	clone := request.Clone(request.Context())
+	clone.Header = request.Header.Clone()
+	for _, name := range []string{"Authorization", "X-Api-Key", "Cookie", "Set-Cookie"} {
+		if clone.Header.Get(name) != "" {
+			clone.Header.Set(name, "[redacted]")
+		}
+	}
+	return httputil.DumpRequest(clone, body)
 }

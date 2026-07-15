@@ -33,5 +33,10 @@ config.yaml
 package-lock.json
 CHANGELOG.md
 
+# Local DeepSeek diagnostics and deployment helpers
+/run-deepseek-live-test.ps1
+/sync-deepseek-token-to-bot.ps1
+/relay/llm/deepseek/live_local_test.go
+
 # osx system
 .DS_Store

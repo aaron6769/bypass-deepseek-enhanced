@@ -21,101 +21,36 @@ import (
 )
 
 var (
-	userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15"
-	lang      string
-	clearance string
+	userAgent    = "DeepSeek/2.0.4 Android/35"
+	webUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	lang         string
+	clearance    string
 
-	mu sync.Mutex
-
-	calcServer = "https://wik5ez2o-helper.hf.space"
+	mu      sync.Mutex
+	powSlot = make(chan struct{}, 1)
 )
 
-//var (
-//	wasmInstance wasm.Instance
-//)
-//
-//func init() {
-//	inst, err := wasm.New("./relay/llm/deepseek/sha3_wasm_bg.wasm")
-//	if err != nil {
-//		panic(err)
-//	}
-//	wasmInstance = inst
-//}
+const webClientVersion = "2.2.0"
 
 type deepseekRequest struct {
-	ChatSessionId   string `json:"chat_session_id"`
-	ParentMessageId *int   `json:"parent_message_id"`
-	Message         string `json:"prompt"`
-	RefFileIds      []int  `json:"ref_file_ids"`
-	ThinkingEnabled bool   `json:"thinking_enabled"`
-	SearchEnabled   bool   `json:"search_enabled"`
+	ChatSessionId   string   `json:"chat_session_id"`
+	ModelType       string   `json:"model_type"`
+	ParentMessageId *int     `json:"parent_message_id"`
+	Message         string   `json:"prompt"`
+	RefFileIds      []string `json:"ref_file_ids"`
+	ThinkingEnabled bool     `json:"thinking_enabled"`
+	SearchEnabled   bool     `json:"search_enabled"`
 }
 
 func fetch(ctx context.Context, proxied, cookie string, request deepseekRequest) (response *http.Response, err error) {
 	retry := 3
 label:
 	retry--
-	response, err = emit.ClientBuilder(common.HTTPClient).
-		Context(ctx).
-		Proxies(proxied).
-		POST("https://chat.deepseek.com/api/v0/chat/create_pow_challenge").
-		JSONHeader().
-		Ja3().
-		Header("authorization", "Bearer "+cookie).
-		Header("referer", "https://chat.deepseek.com/a/chat/").
-		Header("user-agent", userAgent).
-		Header("x-app-version", "20241129.1").
-		Header("x-client-locale", "zh_CN").
-		Header("x-client-platform", "web").
-		Header("x-client-version", "1.0.0-always").
-		Header(elseOf(clearance != "", "cookie"), clearance).
-		Header(elseOf(lang != "", "accept-language"), lang).
-		Body(map[string]interface{}{
-			"target_path": "/api/v0/chat/completion",
-		}).
-		DoC(emit.Status(http.StatusOK), emit.IsJSON)
+	powHeader, err := createPoWResponse(ctx, proxied, cookie, "/api/v0/chat/completion")
 	if err != nil {
-		return
-	}
-
-	obj, err := emit.ToMap(response)
-	if err != nil {
-		_ = response.Body.Close()
-		return
-	}
-
-	_ = response.Body.Close()
-	if code, ok := obj["code"]; !ok || code.(float64) != 0 {
-		err = fmt.Errorf("create challenge failed")
-		msg := obj["msg"]
-		if msg != "" {
-			err = fmt.Errorf(msg.(string))
+		if shouldRetryDeepSeek(err, retry) {
+			goto label
 		}
-		return
-	}
-
-	value, ok := obj["data"].(map[string]interface{})["biz_data"]
-	if !ok {
-		err = fmt.Errorf("create challenge failed")
-		return
-	}
-
-	data := value.(map[string]interface{})
-	data = data["challenge"].(map[string]interface{})
-	num, err := calcAnswer(data)
-	if err != nil {
-		return
-	}
-
-	buf, err := json.Marshal(map[string]interface{}{
-		"algorithm":   "DeepSeekHashV1",
-		"challenge":   data["challenge"],
-		"salt":        data["salt"],
-		"answer":      num,
-		"signature":   data["signature"],
-		"target_path": "/api/v0/chat/completion",
-	})
-	if err != nil {
 		return
 	}
 
@@ -129,25 +64,126 @@ label:
 		Header("origin", "https://chat.deepseek.com").
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", userAgent).
-		Header("x-app-version", "20241129.1").
+		Header("accept-charset", "UTF-8").
 		Header("x-client-locale", "zh_CN").
-		Header("x-client-platform", "web").
-		Header("x-client-version", "1.0.0-always").
-		Header("x-ds-pow-response", base64.RawStdEncoding.EncodeToString(buf)).
+		Header("x-client-platform", "android").
+		Header("x-client-version", "2.0.4").
+		Header("x-ds-pow-response", powHeader).
 		Header(elseOf(clearance != "", "cookie"), clearance).
 		Header(elseOf(lang != "", "accept-language"), lang).
 		Body(request).
 		DoC(emit.Status(http.StatusOK), emit.IsSTREAM)
 	if err != nil {
-		var busErr emit.Error
-		if errors.As(err, &busErr) && strings.Contains(busErr.Msg, "code\":40300,\"msg\":\"Missing Header") {
-			if retry > 0 {
-				logger.Error(err)
-				goto label
-			}
+		if shouldRetryDeepSeek(err, retry) {
+			goto label
 		}
 	}
 	return
+}
+
+func createPoWResponse(ctx context.Context, proxied, cookie, targetPath string, webProfile ...bool) (string, error) {
+	powUserAgent := userAgent
+	if len(webProfile) > 0 && webProfile[0] {
+		powUserAgent = webUserAgent
+	}
+	builder := emit.ClientBuilder(common.HTTPClient).
+		Context(ctx).
+		Proxies(proxied).
+		POST("https://chat.deepseek.com/api/v0/chat/create_pow_challenge").
+		JSONHeader().
+		Ja3().
+		Header("authorization", "Bearer "+cookie).
+		Header("origin", "https://chat.deepseek.com").
+		Header("referer", "https://chat.deepseek.com/").
+		Header("user-agent", powUserAgent).
+		Header("accept-charset", "UTF-8")
+	if len(webProfile) > 0 && webProfile[0] {
+		builder.
+			Header("x-client-bundle-id", "com.deepseek.chat").
+			Header("x-client-locale", "zh_CN").
+			Header("x-client-platform", "web").
+			Header("x-client-version", webClientVersion).
+			Header("x-client-timezone-offset", "28800")
+	} else {
+		builder.
+			Header("x-client-locale", "zh_CN").
+			Header("x-client-platform", "android").
+			Header("x-client-version", "2.0.4")
+	}
+	response, err := builder.
+		Header(elseOf(clearance != "", "cookie"), clearance).
+		Header(elseOf(lang != "", "accept-language"), lang).
+		Body(map[string]interface{}{"target_path": targetPath}).
+		DoC(emit.Status(http.StatusOK), emit.IsJSON)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+
+	obj, err := emit.ToMap(response)
+	if err != nil {
+		return "", err
+	}
+	if code, ok := obj["code"].(float64); !ok || code != 0 {
+		if msg, ok := obj["msg"].(string); ok && msg != "" {
+			return "", errors.New(msg)
+		}
+		return "", errors.New("create challenge failed")
+	}
+
+	data, ok := obj["data"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("create challenge failed: missing data")
+	}
+	bizData, ok := data["biz_data"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("create challenge failed: missing biz_data")
+	}
+	challenge, ok := bizData["challenge"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("create challenge failed: missing challenge")
+	}
+
+	answer, err := calcAnswer(ctx, challenge)
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"algorithm":   "DeepSeekHashV1",
+		"challenge":   challenge["challenge"],
+		"salt":        challenge["salt"],
+		"answer":      answer,
+		"signature":   challenge["signature"],
+		"target_path": targetPath,
+	})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawStdEncoding.EncodeToString(payload), nil
+}
+
+func shouldRetryDeepSeek(err error, retry int) bool {
+	if err == nil || retry <= 0 {
+		return false
+	}
+
+	var busErr emit.Error
+	if errors.As(err, &busErr) {
+		if strings.Contains(busErr.Msg, "code\":40300,\"msg\":\"Missing Header") || strings.Contains(busErr.Msg, "code\":40300,\"msg\":\"MISSING_HEADER") || strings.Contains(strings.ToLower(busErr.Msg), "eof") {
+			logger.Error(err)
+			time.Sleep(500 * time.Millisecond)
+			return true
+		}
+	}
+
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "eof") || strings.Contains(msg, "connection reset") || strings.Contains(msg, "timeout") {
+		logger.Error(err)
+		time.Sleep(500 * time.Millisecond)
+		return true
+	}
+
+	return false
 }
 
 func deleteSession(ctx *gin.Context, env *env.Environment, sessionId string) {
@@ -160,10 +196,10 @@ func deleteSession(ctx *gin.Context, env *env.Environment, sessionId string) {
 		Header("authorization", "Bearer "+ctx.GetString("token")).
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", userAgent).
-		Header("x-app-version", "20241129.1").
+		Header("accept-charset", "UTF-8").
 		Header("x-client-locale", "zh_CN").
-		Header("x-client-platform", "web").
-		Header("x-client-version", "1.0.0-always").
+		Header("x-client-platform", "android").
+		Header("x-client-version", "2.0.4").
 		Header(elseOf(clearance != "", "cookie"), clearance).
 		Header(elseOf(lang != "", "accept-language"), lang).
 		Body(map[string]interface{}{
@@ -175,131 +211,57 @@ func deleteSession(ctx *gin.Context, env *env.Environment, sessionId string) {
 	}
 }
 
-func calcAnswer(data map[string]interface{}) (num int, err error) {
-	timeout, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+func calcAnswer(ctx context.Context, data map[string]interface{}) (num int, err error) {
+	challenge, ok := data["challenge"].(string)
+	if !ok || challenge == "" {
+		return 0, errors.New("invalid DeepSeek PoW challenge")
+	}
+	salt, ok := data["salt"].(string)
+	if !ok || salt == "" {
+		return 0, errors.New("invalid DeepSeek PoW salt")
+	}
+	difficultyValue, ok := data["difficulty"].(float64)
+	if !ok || difficultyValue <= 0 {
+		return 0, errors.New("invalid DeepSeek PoW difficulty")
+	}
+	expireAtValue, ok := data["expire_at"].(float64)
+	if !ok || expireAtValue <= 0 {
+		return 0, errors.New("invalid DeepSeek PoW expiration")
+	}
 
-	challenge := data["challenge"].(string)
-	salt := data["salt"].(string)
-	diff := int(data["difficulty"].(float64))
-	expireAt := int(data["expire_at"].(float64))
-	r, err := emit.ClientBuilder(common.NopHTTPClient).
-		Context(timeout).
-		POST(calcServer+"/ds").
-		JSONHeader().
-		Body(map[string]interface{}{
-			"challenge": challenge,
-			"salt":      salt,
-			"diff":      diff,
-			"expireAt":  expireAt,
-		}).DoC(emit.Status(http.StatusOK), emit.IsJSON)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case powSlot <- struct{}{}:
+		defer func() { <-powSlot }()
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+
+	started := time.Now()
+	answer, err := solveDeepSeekPOW(ctx, challenge, salt, int64(expireAtValue), int64(difficultyValue))
 	if err != nil {
-		return
+		return 0, err
 	}
-
-	obj, err := emit.ToMap(r)
-	if err != nil {
-		return
-	}
-
-	if v, ok := obj["ok"]; !ok || v != true {
-		err = fmt.Errorf("calc answer failed")
-		return
-	}
-	num = int(obj["data"].(float64))
-	return
+	logger.Infof("DeepSeek local PoW solved in %s", time.Since(started))
+	return int(answer), nil
 }
 
-//func calcAnswer(data map[string]interface{}) (num int, err error) {
-//	__wbindgen_add_to_stack_pointer, err := wasmInstance.Exports.GetFunction("__wbindgen_add_to_stack_pointer")
-//	if err != nil {
-//		return
-//	}
-//	c, err := __wbindgen_add_to_stack_pointer(-16)
-//	if err != nil {
-//		return
-//	}
-//
-//	memory, err := wasmInstance.Exports.GetMemory("memory")
-//	if err != nil {
-//		return
-//	}
-//	buffer := memory.Data()
-//
-//	u := func(e string, t, n wasm.NativeFunction) (i int, num int32, err error) {
-//		//
-//		r := len(e)
-//		value, err := t(r, 1)
-//		if err != nil {
-//			return
-//		}
-//
-//		num = value.(int32)
-//		f := 0
-//		for range r {
-//			ch := e[f]
-//			if ch > 127 {
-//				break
-//			}
-//			buffer[int(ch)+f] = ch
-//			f++
-//		}
-//		i = r
-//		return
-//	}
-//
-//	__wbindgen_export_1, err := wasmInstance.Exports.GetFunction("__wbindgen_export_1")
-//	if err != nil {
-//		return
-//	}
-//
-//	// h := data["challenge"].(string)
-//	h := "3530c39e5ee8a2c728fb0542fc80979e18dda94861499981d32b6d68f0d9eac7"
-//	f, s, err := u(h, __wbindgen_export_0, __wbindgen_export_1)
-//	if err != nil {
-//		return
-//	}
-//
-//	//t := fmt.Sprintf("%s_%d_", data["salt"], int(data["expire_at"].(float64)))
-//	t := "cecc9bf94c68b3cfa920_1737771632818_"
-//	p, d, err := u(t, __wbindgen_export_0, __wbindgen_export_1)
-//	if err != nil {
-//		return
-//	}
-//
-//	wasm_solve, err := wasmInstance.Exports.GetFunction("wasm_solve")
-//	if err != nil {
-//		return
-//	}
-//
-//	i := c.(int32)
-//
-//	//n1 := data["difficulty"].(float64)
-//	var n1 float64 = 144000
-//	_, err = wasm_solve(i, s, f, d, p, n1)
-//	if err != nil {
-//		return
-//	}
-//
-//	defer __wbindgen_add_to_stack_pointer(16)
-//	buf := buffer[i : i+4]
-//	reader := bytes.NewReader(buf)
-//	var n int32
-//	err = binary.Read(reader, binary.LittleEndian, &n)
-//	if err != nil {
-//		return
-//	}
-//	buf = buffer[i+8 : i+16]
-//	r := binary.BigEndian.Uint64(buf)
-//	if n == 0 {
-//		num = 0
-//		return
-//	}
-//	num = int(r)
-//	return
-//}
-
 func convertRequest(ctx *gin.Context, env *env.Environment, completion model.Completion) (request deepseekRequest, err error) {
+	mode, ok := resolveDeepSeekMode(completion.Model)
+	if !ok {
+		return request, fmt.Errorf("unsupported DeepSeek model: %s", completion.Model)
+	}
+
+	prompt, imageURLs := buildDeepSeekPrompt(ctx, completion.Messages)
+	if len(imageURLs) > 0 && !mode.VisionEnabled {
+		return request, errors.New("DeepSeek image input requires deepseek-v4-vision or deepseek-v4-vision-nothinking")
+	}
+
+	retry := 3
+retryCreateSession:
+	retry--
 	r, err := emit.ClientBuilder(common.HTTPClient).
 		Context(ctx.Request.Context()).
 		Proxies(env.GetString("server.proxied")).
@@ -309,10 +271,10 @@ func convertRequest(ctx *gin.Context, env *env.Environment, completion model.Com
 		Header("authorization", "Bearer "+ctx.GetString("token")).
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", userAgent).
-		Header("x-app-version", "20241129.1").
+		Header("accept-charset", "UTF-8").
 		Header("x-client-locale", "zh_CN").
-		Header("x-client-platform", "web").
-		Header("x-client-version", "1.0.0-always").
+		Header("x-client-platform", "android").
+		Header("x-client-version", "2.0.4").
 		Header(elseOf(clearance != "", "cookie"), clearance).
 		Header(elseOf(lang != "", "accept-language"), lang).
 		Body(map[string]interface{}{
@@ -323,6 +285,9 @@ func convertRequest(ctx *gin.Context, env *env.Environment, completion model.Com
 		if errors.As(err, &busErr) && busErr.Code == 403 {
 			_ = hookCloudflare(env)
 		}
+		if shouldRetryDeepSeek(err, retry) {
+			goto retryCreateSession
+		}
 		return
 	}
 
@@ -332,45 +297,111 @@ func convertRequest(ctx *gin.Context, env *env.Environment, completion model.Com
 		return
 	}
 
-	if code, ok := obj["code"]; !ok || code.(float64) != 0 {
-		err = fmt.Errorf("create chat session failed")
-		msg := obj["msg"]
-		if msg != "" {
-			err = fmt.Errorf(msg.(string))
+	if code, ok := obj["code"].(float64); !ok || code != 0 {
+		err = errors.New("create chat session failed")
+		if msg, ok := obj["msg"].(string); ok && msg != "" {
+			err = errors.New(msg)
 		}
 		return
 	}
 
-	value, ok := obj["data"].(map[string]interface{})["biz_data"]
+	responseData, ok := obj["data"].(map[string]interface{})
 	if !ok {
-		err = fmt.Errorf("create chat session failed")
+		err = errors.New("create chat session failed: missing data")
+		return
+	}
+	data, ok := responseData["biz_data"].(map[string]interface{})
+	if !ok {
+		err = errors.New("create chat session failed: missing biz_data")
+		return
+	}
+	sessionID := extractDeepSeekSessionID(data)
+	if sessionID == "" {
+		err = errors.New("create chat session failed: missing session id")
 		return
 	}
 
-	contentBuffer := new(bytes.Buffer)
-	if len(completion.Messages) == 1 {
-		contentBuffer.WriteString(completion.Messages[0].GetString("content"))
-		goto label
+	refFileIDs := make([]string, 0, len(imageURLs))
+	if len(imageURLs) > 0 {
+		refFileIDs, err = uploadDeepSeekImages(ctx.Request.Context(), env.GetString("server.proxied"), ctx.GetString("token"), mode, imageURLs)
+		if err != nil {
+			return request, err
+		}
 	}
 
-	for _, message := range completion.Messages {
+	request = deepseekRequest{
+		ChatSessionId:   sessionID,
+		ModelType:       mode.ModelType,
+		RefFileIds:      refFileIDs,
+		ThinkingEnabled: mode.ThinkingEnabled,
+		SearchEnabled:   mode.SearchEnabled,
+		Message:         prompt,
+	}
+	return
+}
+
+func extractDeepSeekSessionID(bizData map[string]interface{}) string {
+	if sessionID, _ := bizData["id"].(string); strings.TrimSpace(sessionID) != "" {
+		return strings.TrimSpace(sessionID)
+	}
+	if chatSession, ok := bizData["chat_session"].(map[string]interface{}); ok {
+		if sessionID, _ := chatSession["id"].(string); strings.TrimSpace(sessionID) != "" {
+			return strings.TrimSpace(sessionID)
+		}
+	}
+	return ""
+}
+
+func buildDeepSeekPrompt(ctx *gin.Context, messages []model.Keyv[interface{}]) (string, []string) {
+	contentBuffer := new(bytes.Buffer)
+	imageURLs := make([]string, 0)
+
+	for index, message := range messages {
+		text, urls := deepSeekMessageContent(message)
+		imageURLs = append(imageURLs, urls...)
+		if len(messages) == 1 && index == 0 {
+			contentBuffer.WriteString(text)
+			continue
+		}
 		role, end := response.ConvertRole(ctx, message.GetString("role"))
 		contentBuffer.WriteString(role)
-		contentBuffer.WriteString(message.GetString("content"))
+		contentBuffer.WriteString(text)
 		contentBuffer.WriteString(end)
 	}
 
-label:
-	data := value.(map[string]interface{})
-	request = deepseekRequest{
-		ChatSessionId:   data["id"].(string),
-		RefFileIds:      make([]int, 0),
-		ThinkingEnabled: completion.Model[9:] == "reasoner",
-		SearchEnabled:   false,
+	return contentBuffer.String(), imageURLs
+}
 
-		Message: contentBuffer.String(),
+func deepSeekMessageContent(message model.Keyv[interface{}]) (string, []string) {
+	if message.IsString("content") {
+		return message.GetString("content"), nil
 	}
-	return
+
+	contentBuffer := new(bytes.Buffer)
+	imageURLs := make([]string, 0)
+	for _, rawPart := range message.GetSlice("content") {
+		part, ok := rawPart.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch part["type"] {
+		case "text", "input_text":
+			if text, ok := part["text"].(string); ok {
+				contentBuffer.WriteString(text)
+			}
+		case "image_url", "input_image":
+			if imageURL, ok := part["image_url"].(string); ok && imageURL != "" {
+				imageURLs = append(imageURLs, imageURL)
+				continue
+			}
+			if image, ok := part["image_url"].(map[string]interface{}); ok {
+				if imageURL, ok := image["url"].(string); ok && imageURL != "" {
+					imageURLs = append(imageURLs, imageURL)
+				}
+			}
+		}
+	}
+	return contentBuffer.String(), imageURLs
 }
 
 func hookCloudflare(env *env.Environment) error {
