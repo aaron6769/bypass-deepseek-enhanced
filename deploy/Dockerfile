@@ -1,16 +1,34 @@
-FROM golang:1.23-alpine AS builder
+# syntax=docker/dockerfile:1.7
+
+FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+RUN apk add --no-cache git make
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN go install -ldflags="-s -w" -trimpath ./cmd/iocgo && \
+    CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
+    go build -toolexec iocgo -ldflags="-s -w" -trimpath -o /out/server main.go
+
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates && \
+    addgroup -S adapter && adduser -S -G adapter adapter
 
 WORKDIR /app
-RUN apk add git make && git clone https://github.com/bincooo/chatgpt-adapter.git .
-RUN make install
-RUN make build-linux
+COPY --from=builder /out/server ./server
 
-FROM alpine:3.19.0
-WORKDIR /app
-COPY --from=builder /app/bin/linux/server ./server
-RUN echo -e 'server:\n  port: 8080' > ./config.yaml
-RUN chmod +x server
+RUN printf 'server:\n  port: 8080\n' > ./config.yaml && \
+    chown -R adapter:adapter /app
 
-ENV ARG "--port 8080"
-CMD ["./server ${ARG}"]
-ENTRYPOINT ["sh", "-c"]
+USER adapter
+EXPOSE 8080
+
+ENTRYPOINT ["./server"]
+CMD ["--port", "8080"]
