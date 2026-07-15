@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"chatgpt-adapter/core/gin/model"
 	"encoding/json"
+	"fmt"
 	"github.com/iocgo/sdk/env"
 	"io"
 	"net/http"
@@ -20,7 +21,8 @@ import (
 )
 
 const (
-	ginTokens = "__tokens__"
+	ginTokens                 = "__tokens__"
+	maxDeepSeekEventLineBytes = 8 << 20
 )
 
 func waitMessage(r *http.Response, cancel func(str string) bool) (content string, err error) {
@@ -28,7 +30,7 @@ func waitMessage(r *http.Response, cancel func(str string) bool) (content string
 	reader := bufio.NewReader(r.Body)
 	var dataBytes []byte
 	for {
-		dataBytes, _, err = reader.ReadLine()
+		dataBytes, err = readDeepSeekEventLine(reader)
 		if err == io.EOF {
 			break
 		}
@@ -99,7 +101,7 @@ func waitResponse(ctx *gin.Context, r *http.Response, sse bool) (content string)
 	deepseekContentPatch := false
 	deepseekFragmentType := ""
 	for {
-		dataBytes, _, err := reader.ReadLine()
+		dataBytes, err := readDeepSeekEventLine(reader)
 		if err == io.EOF {
 			break
 		}
@@ -269,6 +271,39 @@ func waitResponse(ctx *gin.Context, r *http.Response, sse bool) (content string)
 		response.SSEResponse(ctx, Model, "[DONE]", created)
 	}
 	return
+}
+
+func readDeepSeekEventLine(reader *bufio.Reader) ([]byte, error) {
+	fragment, isPrefix, err := reader.ReadLine()
+	if len(fragment) > maxDeepSeekEventLineBytes {
+		return nil, fmt.Errorf("DeepSeek event line exceeds %d MiB", maxDeepSeekEventLineBytes>>20)
+	}
+	if err != nil {
+		if err == io.EOF && len(fragment) > 0 {
+			return fragment, nil
+		}
+		return nil, err
+	}
+	if !isPrefix {
+		return fragment, nil
+	}
+	line := append([]byte(nil), fragment...)
+	for {
+		fragment, isPrefix, err = reader.ReadLine()
+		if len(fragment) > maxDeepSeekEventLineBytes-len(line) {
+			return nil, fmt.Errorf("DeepSeek event line exceeds %d MiB", maxDeepSeekEventLineBytes>>20)
+		}
+		line = append(line, fragment...)
+		if err != nil {
+			if err == io.EOF && len(line) > 0 {
+				return line, nil
+			}
+			return nil, err
+		}
+		if !isPrefix {
+			return line, nil
+		}
+	}
 }
 
 func isDeepSeekContentPatchPath(path string) bool {

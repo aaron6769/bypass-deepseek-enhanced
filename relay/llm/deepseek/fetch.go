@@ -186,14 +186,21 @@ func shouldRetryDeepSeek(err error, retry int) bool {
 	return false
 }
 
-func deleteSession(ctx *gin.Context, env *env.Environment, sessionId string) {
-	_, err := emit.ClientBuilder(common.HTTPClient).
-		Context(ctx.Request.Context()).
-		Proxies(env.GetString("server.proxied")).
+func deleteSession(proxied, cookie, sessionId string) {
+	if strings.TrimSpace(sessionId) == "" {
+		return
+	}
+
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := emit.ClientBuilder(common.HTTPClient).
+		Context(cleanupCtx).
+		Proxies(proxied).
 		POST("https://chat.deepseek.com/api/v0/chat_session/delete").
 		JSONHeader().
 		Ja3().
-		Header("authorization", "Bearer "+ctx.GetString("token")).
+		Header("authorization", "Bearer "+cookie).
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", userAgent).
 		Header("accept-charset", "UTF-8").
@@ -205,9 +212,11 @@ func deleteSession(ctx *gin.Context, env *env.Environment, sessionId string) {
 		Body(map[string]interface{}{
 			"chat_session_id": sessionId,
 		}).DoC(emit.Status(http.StatusOK), emit.IsJSON)
+	if r != nil && r.Body != nil {
+		defer r.Body.Close()
+	}
 	if err != nil {
 		logger.Error(err)
-		return
 	}
 }
 
@@ -253,6 +262,8 @@ func convertRequest(ctx *gin.Context, env *env.Environment, completion model.Com
 	if !ok {
 		return request, fmt.Errorf("unsupported DeepSeek model: %s", completion.Model)
 	}
+	proxied := env.GetString("server.proxied")
+	cookie := ctx.GetString("token")
 
 	prompt, imageURLs := buildDeepSeekPrompt(ctx, completion.Messages)
 	if len(imageURLs) > 0 && !mode.VisionEnabled {
@@ -264,11 +275,11 @@ retryCreateSession:
 	retry--
 	r, err := emit.ClientBuilder(common.HTTPClient).
 		Context(ctx.Request.Context()).
-		Proxies(env.GetString("server.proxied")).
+		Proxies(proxied).
 		POST("https://chat.deepseek.com/api/v0/chat_session/create").
 		JSONHeader().
 		Ja3().
-		Header("authorization", "Bearer "+ctx.GetString("token")).
+		Header("authorization", "Bearer "+cookie).
 		Header("referer", "https://chat.deepseek.com/").
 		Header("user-agent", userAgent).
 		Header("accept-charset", "UTF-8").
@@ -320,10 +331,16 @@ retryCreateSession:
 		err = errors.New("create chat session failed: missing session id")
 		return
 	}
+	cleanupSession := true
+	defer func() {
+		if cleanupSession {
+			deleteSession(proxied, cookie, sessionID)
+		}
+	}()
 
 	refFileIDs := make([]string, 0, len(imageURLs))
 	if len(imageURLs) > 0 {
-		refFileIDs, err = uploadDeepSeekImages(ctx.Request.Context(), env.GetString("server.proxied"), ctx.GetString("token"), mode, imageURLs)
+		refFileIDs, err = uploadDeepSeekImages(ctx.Request.Context(), proxied, cookie, mode, imageURLs)
 		if err != nil {
 			return request, err
 		}
@@ -337,6 +354,7 @@ retryCreateSession:
 		SearchEnabled:   mode.SearchEnabled,
 		Message:         prompt,
 	}
+	cleanupSession = false
 	return
 }
 

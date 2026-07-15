@@ -38,6 +38,37 @@ func TestWaitResponseKeepsFirstFragmentAfterTitleEvent(t *testing.T) {
 	}
 }
 
+func TestWaitResponseKeepsLongEventLine(t *testing.T) {
+	previousEnv := env.Env
+	env.Env = &env.Environment{Viper: viper.New()}
+	defer func() { env.Env = previousEnv }()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	want := strings.Repeat("x", 70<<10)
+	payload, err := json.Marshal(map[string]interface{}{
+		"p": "response/fragments/-1/content",
+		"v": want,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := strings.Join([]string{
+		"data: " + string(payload),
+		`data: {"p":"response/status","v":"FINISHED"}`,
+		"",
+	}, "\n")
+	upstream := &http.Response{
+		Body:   io.NopCloser(strings.NewReader(stream)),
+		Header: make(http.Header),
+	}
+
+	if got := waitResponse(ctx, upstream, false); got != want {
+		t.Fatalf("waitResponse() returned %d bytes, want %d", len(got), len(want))
+	}
+}
+
 func TestWaitResponseKeepsContentFromAppendedFragmentObject(t *testing.T) {
 	previousEnv := env.Env
 	env.Env = &env.Environment{Viper: viper.New()}

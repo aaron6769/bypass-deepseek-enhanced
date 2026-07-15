@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"chatgpt-adapter/core/common"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/textproto"
 	"net/url"
 	"path/filepath"
@@ -21,6 +24,19 @@ import (
 )
 
 const maxDeepSeekImageBytes = 20 << 20
+
+var blockedDeepSeekImagePrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("2001:2::/48"),
+	netip.MustParsePrefix("2002::/16"),
+}
 
 func uploadDeepSeekImages(ctx context.Context, proxied, cookie string, mode deepSeekMode, imageURLs []string) ([]string, error) {
 	fileIDs := make([]string, 0, len(imageURLs))
@@ -35,7 +51,7 @@ func uploadDeepSeekImages(ctx context.Context, proxied, cookie string, mode deep
 }
 
 func uploadDeepSeekImage(ctx context.Context, proxied, cookie string, mode deepSeekMode, imageURL string) (string, error) {
-	data, contentType, filename, err := loadDeepSeekImage(proxied, imageURL)
+	data, contentType, filename, err := loadDeepSeekImage(ctx, proxied, imageURL)
 	if err != nil {
 		return "", err
 	}
@@ -146,7 +162,10 @@ func uploadDeepSeekImage(ctx context.Context, proxied, cookie string, mode deepS
 	return "", lastErr
 }
 
-func loadDeepSeekImage(proxied, imageURL string) ([]byte, string, string, error) {
+func loadDeepSeekImage(ctx context.Context, proxied, imageURL string) ([]byte, string, string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	imageURL = strings.TrimSpace(imageURL)
 	if strings.HasPrefix(imageURL, "data:") {
 		comma := strings.IndexByte(imageURL, ',')
@@ -154,16 +173,24 @@ func loadDeepSeekImage(proxied, imageURL string) ([]byte, string, string, error)
 			return nil, "", "", errors.New("invalid DeepSeek image data URI")
 		}
 		meta, payload := imageURL[5:comma], imageURL[comma+1:]
-		if !strings.Contains(meta, ";base64") {
+		metaParts := strings.Split(meta, ";")
+		contentType := strings.TrimSpace(metaParts[0])
+		base64Encoded := false
+		for _, option := range metaParts[1:] {
+			if strings.EqualFold(strings.TrimSpace(option), "base64") {
+				base64Encoded = true
+				break
+			}
+		}
+		if !base64Encoded {
 			return nil, "", "", errors.New("DeepSeek image data URI must be base64 encoded")
 		}
-		contentType := strings.TrimSpace(strings.Split(meta, ";")[0])
-		data, err := base64.StdEncoding.DecodeString(payload)
+		if !isDeepSeekImageContentType(contentType) {
+			return nil, "", "", errors.New("DeepSeek image data URI must use an image media type")
+		}
+		data, err := readDeepSeekImage(base64.NewDecoder(base64.StdEncoding, strings.NewReader(payload)), -1)
 		if err != nil {
 			return nil, "", "", fmt.Errorf("decode DeepSeek image: %w", err)
-		}
-		if contentType == "" {
-			contentType = http.DetectContentType(data)
 		}
 		return data, contentType, deepSeekImageFilename("image", contentType), nil
 	}
@@ -172,16 +199,165 @@ func loadDeepSeekImage(proxied, imageURL string) ([]byte, string, string, error)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, "", "", errors.New("DeepSeek image URL must use data, http, or https")
 	}
-	data, err := common.DownloadBuffer(common.HTTPClient, proxied, imageURL, map[string]string{"User-Agent": userAgent})
+	if err = validateDeepSeekImageURL(ctx, parsed); err != nil {
+		return nil, "", "", err
+	}
+	response, err := downloadDeepSeekImage(ctx, proxied, parsed)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("download DeepSeek image: %w", err)
 	}
-	contentType := http.DetectContentType(data)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, "", "", fmt.Errorf("download DeepSeek image: HTTP %d", response.StatusCode)
+	}
+	data, err := readDeepSeekImage(response.Body, response.ContentLength)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("download DeepSeek image: %w", err)
+	}
+	contentType := response.Header.Get("Content-Type")
+	if !isDeepSeekImageContentType(contentType) {
+		contentType = http.DetectContentType(data)
+	}
+	if !isDeepSeekImageContentType(contentType) {
+		return nil, "", "", errors.New("download DeepSeek image: response is not an image")
+	}
 	filename := filepath.Base(parsed.Path)
 	if filename == "." || filename == "/" || filename == "" {
 		filename = "image"
 	}
 	return data, contentType, deepSeekImageFilename(filename, contentType), nil
+}
+
+func validateDeepSeekImageURL(ctx context.Context, parsed *url.URL) error {
+	_, err := resolveDeepSeekImageAddress(ctx, parsed)
+	return err
+}
+
+func resolveDeepSeekImageAddress(ctx context.Context, parsed *url.URL) (netip.Addr, error) {
+	if parsed.User != nil {
+		return netip.Addr{}, errors.New("DeepSeek image URL must not contain credentials")
+	}
+	hostname := strings.TrimSpace(parsed.Hostname())
+	if hostname == "" {
+		return netip.Addr{}, errors.New("DeepSeek image URL is missing a hostname")
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		if !isPublicDeepSeekImageIP(ip) {
+			return netip.Addr{}, errors.New("DeepSeek image URL resolves to a non-public address")
+		}
+		address, _ := netip.AddrFromSlice(ip)
+		return address.Unmap(), nil
+	}
+
+	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, hostname)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("resolve DeepSeek image URL: %w", err)
+	}
+	if len(addresses) == 0 {
+		return netip.Addr{}, errors.New("resolve DeepSeek image URL: no addresses returned")
+	}
+	var selected netip.Addr
+	for _, address := range addresses {
+		if !isPublicDeepSeekImageIP(address.IP) {
+			return netip.Addr{}, errors.New("DeepSeek image URL resolves to a non-public address")
+		}
+		if !selected.IsValid() {
+			selected, _ = netip.AddrFromSlice(address.IP)
+			selected = selected.Unmap()
+		}
+	}
+	return selected, nil
+}
+
+func downloadDeepSeekImage(ctx context.Context, proxied string, parsed *url.URL) (*http.Response, error) {
+	address, err := resolveDeepSeekImageAddress(ctx, parsed)
+	if err != nil {
+		return nil, err
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DisableKeepAlives = true
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: parsed.Hostname(),
+	}
+	if strings.TrimSpace(proxied) != "" {
+		proxyURL, parseErr := url.Parse(proxied)
+		if parseErr != nil || proxyURL.Scheme == "" || proxyURL.Host == "" {
+			return nil, errors.New("download DeepSeek image: invalid proxy URL")
+		}
+		switch strings.ToLower(proxyURL.Scheme) {
+		case "http", "socks5", "socks5h":
+		default:
+			return nil, errors.New("download DeepSeek image: unsupported proxy scheme")
+		}
+		transport.Proxy = http.ProxyURL(proxyURL)
+	}
+
+	pinnedURL := *parsed
+	port := parsed.Port()
+	if port == "" {
+		if strings.EqualFold(parsed.Scheme, "https") {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	pinnedURL.Host = net.JoinHostPort(address.String(), port)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, pinnedURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Host = parsed.Host
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	return client.Do(request)
+}
+
+func isPublicDeepSeekImageIP(ip net.IP) bool {
+	address, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	address = address.Unmap()
+	if !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() ||
+		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() ||
+		address.IsMulticast() || address.IsUnspecified() {
+		return false
+	}
+	for _, prefix := range blockedDeepSeekImagePrefixes {
+		if prefix.Contains(address) {
+			return false
+		}
+	}
+	return true
+}
+
+func readDeepSeekImage(reader io.Reader, contentLength int64) ([]byte, error) {
+	if contentLength > maxDeepSeekImageBytes {
+		return nil, fmt.Errorf("DeepSeek image input exceeds %d MiB", maxDeepSeekImageBytes>>20)
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, maxDeepSeekImageBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDeepSeekImageBytes {
+		return nil, fmt.Errorf("DeepSeek image input exceeds %d MiB", maxDeepSeekImageBytes>>20)
+	}
+	return data, nil
+}
+
+func isDeepSeekImageContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	return err == nil && strings.HasPrefix(strings.ToLower(mediaType), "image/")
 }
 
 func deepSeekImageFilename(filename, contentType string) string {
