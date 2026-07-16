@@ -10,7 +10,7 @@ import (
 	"github.com/iocgo/sdk/env"
 )
 
-func toolChoice(ctx *gin.Context, env *env.Environment, proxies, cookie string, completion model.Completion) bool {
+func toolChoice(ctx *gin.Context, env *env.Environment, connection deepSeekConnection, completion model.Completion) bool {
 	logger.Info("completeTools ...")
 	echo := ctx.GetBool(vars.GinEcho)
 
@@ -30,13 +30,13 @@ func toolChoice(ctx *gin.Context, env *env.Environment, proxies, cookie string, 
 		if err != nil {
 			return "", err
 		}
+		defer deleteSession(connection, request.ChatSessionId)
 
-		r, err := fetch(ctx.Request.Context(), proxies, cookie, request)
+		r, err := fetch(ctx.Request.Context(), connection, request)
 		if err != nil {
 			return "", err
 		}
 
-		defer deleteSession(ctx, env, request.ChatSessionId)
 		return waitMessage(r, toolcall.Cancel)
 	})
 

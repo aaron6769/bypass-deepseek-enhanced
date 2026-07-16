@@ -13,7 +13,7 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
-.env
+.env*
 /bin/
 /log/
 /images/
@@ -29,7 +29,15 @@ go.work
 cookies_test.go
 internal/gin.handler/3rd.go
 cookies.txt
-config.yaml
+config*.yaml
+config*.yml
+credentials*.json
+secrets*.json
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
 package-lock.json
 CHANGELOG.md
 

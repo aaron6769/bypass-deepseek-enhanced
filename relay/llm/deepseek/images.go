@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"chatgpt-adapter/core/common"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/bincooo/emit.io"
@@ -13,7 +12,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,10 +20,10 @@ import (
 
 const maxDeepSeekImageBytes = 20 << 20
 
-func uploadDeepSeekImages(ctx context.Context, proxied, cookie string, mode deepSeekMode, imageURLs []string) ([]string, error) {
+func uploadDeepSeekImages(ctx context.Context, connection deepSeekConnection, mode deepSeekMode, imageURLs []string) ([]string, error) {
 	fileIDs := make([]string, 0, len(imageURLs))
 	for _, imageURL := range imageURLs {
-		fileID, err := uploadDeepSeekImage(ctx, proxied, cookie, mode, imageURL)
+		fileID, err := uploadDeepSeekImage(ctx, connection, mode, imageURL)
 		if err != nil {
 			return nil, err
 		}
@@ -34,8 +32,8 @@ func uploadDeepSeekImages(ctx context.Context, proxied, cookie string, mode deep
 	return fileIDs, nil
 }
 
-func uploadDeepSeekImage(ctx context.Context, proxied, cookie string, mode deepSeekMode, imageURL string) (string, error) {
-	data, contentType, filename, err := loadDeepSeekImage(proxied, imageURL)
+func uploadDeepSeekImage(ctx context.Context, connection deepSeekConnection, mode deepSeekMode, imageURL string) (string, error) {
+	data, contentType, filename, err := loadDeepSeekImage(ctx, connection.Proxied, imageURL)
 	if err != nil {
 		return "", err
 	}
@@ -68,17 +66,17 @@ func uploadDeepSeekImage(ctx context.Context, proxied, cookie string, mode deepS
 
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		powHeader, powErr := createPoWResponse(ctx, proxied, cookie, "/api/v0/file/upload_file", true)
+		powHeader, powErr := createPoWResponse(ctx, connection, "/api/v0/file/upload_file", true)
 		if powErr != nil {
 			lastErr = fmt.Errorf("DeepSeek image upload PoW challenge: %w", powErr)
 			continue
 		}
 		response, requestErr := emit.ClientBuilder(common.HTTPClient).
 			Context(ctx).
-			Proxies(proxied).
+			Proxies(connection.Proxied).
 			POST("https://chat.deepseek.com/api/v0/file/upload_file").
 			Ja3().
-			Header("authorization", "Bearer "+cookie).
+			Header("authorization", "Bearer "+connection.Cookie).
 			Header("content-type", writer.FormDataContentType()).
 			Header("accept", "application/json").
 			Header("origin", "https://chat.deepseek.com").
@@ -98,6 +96,7 @@ func uploadDeepSeekImage(ctx context.Context, proxied, cookie string, mode deepS
 			Bytes(body.Bytes()).
 			Do()
 		if requestErr != nil {
+			closeDeepSeekResponse(response)
 			lastErr = fmt.Errorf("DeepSeek image upload request: %w", requestErr)
 			continue
 		}
@@ -134,7 +133,7 @@ func uploadDeepSeekImage(ctx context.Context, proxied, cookie string, mode deepS
 		if isDeepSeekFileReady(status) {
 			return fileID, nil
 		}
-		if err = waitForDeepSeekFile(ctx, proxied, cookie, fileID); err != nil {
+		if err = waitForDeepSeekFile(ctx, connection, fileID); err != nil {
 			return "", err
 		}
 		return fileID, nil
@@ -144,44 +143,6 @@ func uploadDeepSeekImage(ctx context.Context, proxied, cookie string, mode deepS
 		lastErr = errors.New("DeepSeek image upload failed")
 	}
 	return "", lastErr
-}
-
-func loadDeepSeekImage(proxied, imageURL string) ([]byte, string, string, error) {
-	imageURL = strings.TrimSpace(imageURL)
-	if strings.HasPrefix(imageURL, "data:") {
-		comma := strings.IndexByte(imageURL, ',')
-		if comma <= 5 {
-			return nil, "", "", errors.New("invalid DeepSeek image data URI")
-		}
-		meta, payload := imageURL[5:comma], imageURL[comma+1:]
-		if !strings.Contains(meta, ";base64") {
-			return nil, "", "", errors.New("DeepSeek image data URI must be base64 encoded")
-		}
-		contentType := strings.TrimSpace(strings.Split(meta, ";")[0])
-		data, err := base64.StdEncoding.DecodeString(payload)
-		if err != nil {
-			return nil, "", "", fmt.Errorf("decode DeepSeek image: %w", err)
-		}
-		if contentType == "" {
-			contentType = http.DetectContentType(data)
-		}
-		return data, contentType, deepSeekImageFilename("image", contentType), nil
-	}
-
-	parsed, err := url.Parse(imageURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, "", "", errors.New("DeepSeek image URL must use data, http, or https")
-	}
-	data, err := common.DownloadBuffer(common.HTTPClient, proxied, imageURL, map[string]string{"User-Agent": userAgent})
-	if err != nil {
-		return nil, "", "", fmt.Errorf("download DeepSeek image: %w", err)
-	}
-	contentType := http.DetectContentType(data)
-	filename := filepath.Base(parsed.Path)
-	if filename == "." || filename == "/" || filename == "" {
-		filename = "image"
-	}
-	return data, contentType, deepSeekImageFilename(filename, contentType), nil
 }
 
 func deepSeekImageFilename(filename, contentType string) string {
@@ -198,18 +159,18 @@ func deepSeekImageFilename(filename, contentType string) string {
 	return filename
 }
 
-func waitForDeepSeekFile(ctx context.Context, proxied, cookie, fileID string) error {
+func waitForDeepSeekFile(ctx context.Context, connection deepSeekConnection, fileID string) error {
 	for attempt := 0; attempt < 30; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		response, err := emit.ClientBuilder(common.HTTPClient).
 			Context(ctx).
-			Proxies(proxied).
+			Proxies(connection.Proxied).
 			GET("https://chat.deepseek.com/api/v0/file/fetch_files").
 			Query("file_ids", fileID).
 			Ja3().
-			Header("authorization", "Bearer "+cookie).
+			Header("authorization", "Bearer "+connection.Cookie).
 			Header("accept", "application/json").
 			Header("origin", "https://chat.deepseek.com").
 			Header("referer", "https://chat.deepseek.com/").
@@ -232,6 +193,8 @@ func waitForDeepSeekFile(ctx context.Context, proxied, cookie, fileID string) er
 					return nil
 				}
 			}
+		} else {
+			closeDeepSeekResponse(response)
 		}
 		select {
 		case <-ctx.Done():

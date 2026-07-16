@@ -20,6 +20,18 @@ type api struct {
 	env *env.Environment
 }
 
+type deepSeekConnection struct {
+	Proxied string
+	Cookie  string
+}
+
+func (api *api) connection(ctx *gin.Context) deepSeekConnection {
+	return deepSeekConnection{
+		Proxied: api.env.GetString("server.proxied"),
+		Cookie:  ctx.GetString("token"),
+	}
+}
+
 func (api *api) Match(ctx *gin.Context, model string) (ok bool, err error) {
 	_, ok = resolveDeepSeekMode(model)
 	return
@@ -39,12 +51,11 @@ func (api *api) Models() (slice []model.Model) {
 
 func (api *api) ToolChoice(ctx *gin.Context) (ok bool, err error) {
 	var (
-		cookie     = ctx.GetString("token")
-		proxied    = api.env.GetString("server.proxied")
+		connection = api.connection(ctx)
 		completion = common.GetGinCompletion(ctx)
 	)
 
-	if toolChoice(ctx, api.env, cookie, proxied, completion) {
+	if toolChoice(ctx, api.env, connection, completion) {
 		ok = true
 	}
 	return
@@ -52,8 +63,7 @@ func (api *api) ToolChoice(ctx *gin.Context) (ok bool, err error) {
 
 func (api *api) Completion(ctx *gin.Context) (err error) {
 	var (
-		cookie     = ctx.GetString("token")
-		proxied    = api.env.GetString("server.proxied")
+		connection = api.connection(ctx)
 		completion = common.GetGinCompletion(ctx)
 	)
 
@@ -62,14 +72,14 @@ func (api *api) Completion(ctx *gin.Context) (err error) {
 		logger.Error(err)
 		return
 	}
+	defer deleteSession(connection, request.ChatSessionId)
 
-	r, err := fetch(ctx.Request.Context(), proxied, cookie, request)
+	r, err := fetch(ctx.Request.Context(), connection, request)
 	if err != nil {
 		logger.Error(err)
 		return
 	}
 
-	defer deleteSession(ctx, api.env, request.ChatSessionId)
 	content := waitResponse(ctx, r, completion.Stream)
 	if content == "" && response.NotResponse(ctx) {
 		response.Error(ctx, -1, "EMPTY RESPONSE")
