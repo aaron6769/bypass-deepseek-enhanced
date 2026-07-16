@@ -20,6 +20,16 @@ Changes maintained in this repository:
 - Improved Windows `toolexec` builds by ensuring the host Go binary remains discoverable.
 - Added regression coverage for model mapping, PoW, image payloads, request redaction, and response parsing.
 
+## 2026-07-16 — Security, lifecycle, and container hardening
+
+- Corrected DeepSeek tool-call credential/proxy routing with a typed connection value.
+- Added bounded image reads, public-address enforcement, DNS pinning, redirect revalidation, timeouts, and image media validation.
+- Reassembled long SSE lines and preserved response fragments across scanner buffer boundaries.
+- Moved session cleanup ahead of fallible requests and closed response bodies on all relevant paths.
+- Removed an inherited hard-coded You.com session cookie; background checks now use configured `you.cookies` only.
+- Upgraded the project and container build to Go 1.26.5 and refreshed vulnerable networking and cryptography dependencies.
+- Changed both Dockerfiles to build the checked-out enhanced source and added multi-platform GitHub Actions verification and publishing.
+
 Local deployment scripts, credentials, runtime configuration, and environment-specific live-test helpers are intentionally excluded from the public repository.
 
 The upstream copyright and GPL-3.0 license remain in effect. Changes in this repository are distributed under the same license.

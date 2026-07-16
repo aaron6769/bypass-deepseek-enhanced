@@ -36,7 +36,7 @@ An enhanced DeepSeek Web API adapter based on [xllm-go/bypass](https://github.co
 
 ## 构建 / Build
 
-项目使用 Go 1.23.3，并沿用上游的 `iocgo` 构建流程。
+项目使用 Go 1.26.5，并沿用上游的 `iocgo` 构建流程。
 
 ```shell
 go install ./cmd/iocgo
@@ -47,8 +47,10 @@ go build -toolexec iocgo ./main.go
 
 ```shell
 make install
-make build
+make build-linux
 ```
+
+仓库的 GitHub Actions 会验证 `linux/amd64` 和 `linux/arm64` 镜像。合并到 `main` 或推送 `v*` 标签后，会将镜像发布到 `ghcr.io/aaron6769/bypass-deepseek-enhanced`。
 
 ## 测试 / Test
 
@@ -62,6 +64,14 @@ go test ./core/gin ./relay/llm/deepseek
 
 请勿提交真实的 `config.yaml`、`.env`、Cookie、Token、账号密码或部署密钥。本仓库的 `.gitignore` 已默认排除常见本地配置和构建产物。
 
+### 图片输入安全 / Image input safety
+
+- 单张图片最大 20 MiB，支持图片 `data:` URI 和公开的 HTTP(S) URL。
+- URL 下载会拒绝回环、私网、链路本地、云元数据及特殊转换网段，并对每次重定向重新解析和校验，最多跟随 3 次。
+- 图片下载代理支持 HTTP、SOCKS5 和 SOCKS5H。HTTPS 代理因目标证书固定需要独立 TLS 配置，当前会明确拒绝。
+- 上述代理限制仅适用于从 URL 下载图片，不改变其他适配器请求所使用的 `server.proxied` 行为。
+- You.com 的定时检查只使用本地配置中的 `you.cookies`，仓库不提供或回退到内置账号 Cookie。
+
 ## 上游与修改记录 / Upstream and changes
 
 - Upstream repository: [xllm-go/bypass](https://github.com/xllm-go/bypass)
@@ -74,7 +84,7 @@ go test ./core/gin ./relay/llm/deepseek
 
 本项目仅用于测试、学习和研究。网页接口可能随时变化，不能保证其合法性、准确性、稳定性、完整性或长期可用性。使用者应自行确认并遵守所在地区法律、服务条款和账号规则，不得用于非法用途。
 
-上游 README 还包含非商业使用、资源转载和使用期限等特别声明。为降低许可及使用风险，使用本项目时也应阅读并尊重[上游仓库的完整声明](https://github.com/xllm-go/bypass#%E7%89%B9%E5%88%AB%E5%A3%B0%E6%98%8E)。
+上游 README 还包含非商业使用和资源转载限制等特别声明。为降低许可及使用风险，使用本项目时也应阅读并尊重[上游仓库的完整声明](https://github.com/xllm-go/bypass#%E7%89%B9%E5%88%AB%E5%A3%B0%E6%98%8E)。
 
 This project is intended for testing, learning, and research. Web APIs may change without notice. Users are responsible for complying with applicable laws, service terms, and account policies.
 
