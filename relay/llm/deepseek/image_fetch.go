@@ -27,6 +27,7 @@ const (
 )
 
 var deepSeekBlockedPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("192.0.0.0/24"),
 	netip.MustParsePrefix("192.0.2.0/24"),
@@ -34,7 +35,13 @@ var deepSeekBlockedPublicPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("198.51.100.0/24"),
 	netip.MustParsePrefix("203.0.113.0/24"),
 	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("2001:2::/48"),
 	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
 }
 
 func loadDeepSeekImage(ctx context.Context, proxied, imageURL string) ([]byte, string, string, error) {
@@ -266,8 +273,10 @@ func newDeepSeekImageHTTPClient(proxied, serverName string) (*http.Client, *http
 			return nil, nil, errors.New("invalid image proxy URL")
 		}
 		switch strings.ToLower(proxyURL.Scheme) {
-		case "http", "https":
+		case "http":
 			transport.Proxy = http.ProxyURL(proxyURL)
+		case "https":
+			return nil, nil, errors.New("image proxy must not use https because target certificate pinning requires a separate TLS configuration")
 		case "socks5", "socks5h":
 			if strings.EqualFold(proxyURL.Scheme, "socks5h") {
 				proxyURL.Scheme = "socks5"
@@ -282,7 +291,7 @@ func newDeepSeekImageHTTPClient(proxied, serverName string) (*http.Client, *http
 			}
 			transport.DialContext = contextDialer.DialContext
 		default:
-			return nil, nil, errors.New("image proxy must use http, https, socks5, or socks5h")
+			return nil, nil, errors.New("image proxy must use http, socks5, or socks5h")
 		}
 	}
 

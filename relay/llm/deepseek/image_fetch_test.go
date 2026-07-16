@@ -12,6 +12,7 @@ func TestDeepSeekImageAddressPolicy(t *testing.T) {
 	tests := map[string]bool{
 		"1.1.1.1":              true,
 		"2606:4700:4700::1111": true,
+		"0.0.0.1":              false,
 		"127.0.0.1":            false,
 		"10.0.0.1":             false,
 		"100.64.0.1":           false,
@@ -20,7 +21,13 @@ func TestDeepSeekImageAddressPolicy(t *testing.T) {
 		"198.51.100.1":         false,
 		"203.0.113.1":          false,
 		"::1":                  false,
+		"64:ff9b::a00:1":       false,
+		"64:ff9b:1::a00:1":     false,
+		"100::1":               false,
+		"2001::1":              false,
+		"2001:2::1":            false,
 		"2001:db8::1":          false,
+		"2002:a00:1::":         false,
 		"fe80::1":              false,
 	}
 	for raw, want := range tests {
@@ -28,6 +35,21 @@ func TestDeepSeekImageAddressPolicy(t *testing.T) {
 		if got := isPublicDeepSeekImageIP(address); got != want {
 			t.Fatalf("isPublicDeepSeekImageIP(%s) = %v, want %v", address, got, want)
 		}
+	}
+}
+
+func TestDeepSeekImageProxyPolicy(t *testing.T) {
+	client, transport, err := newDeepSeekImageHTTPClient("http://127.0.0.1:8080", "example.com")
+	if err != nil || client == nil || transport == nil {
+		t.Fatalf("HTTP proxy rejected: client=%v transport=%v err=%v", client, transport, err)
+	}
+	transport.CloseIdleConnections()
+
+	if _, _, err = newDeepSeekImageHTTPClient("https://127.0.0.1:8443", "example.com"); err == nil {
+		t.Fatal("HTTPS proxy was accepted without a separate proxy TLS configuration")
+	}
+	if _, _, err = newDeepSeekImageHTTPClient("ftp://127.0.0.1:21", "example.com"); err == nil {
+		t.Fatal("unsupported image proxy scheme was accepted")
 	}
 }
 
