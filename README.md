@@ -15,7 +15,8 @@ An enhanced DeepSeek Web API adapter based on [xllm-go/bypass](https://github.co
 - 支持思考模式与无思考模式的独立模型别名。
 - 将 `THINK` 片段输出到 OpenAI 兼容的 `reasoning_content`，将最终回答保留在 `content`。
 - 修复流式 JSON Patch 中无路径增量继承以及最终回答首字符丢失问题。
-- 提供本地 PoW 求解与图片上传适配。
+- 提供本地 PoW 求解与图片上传适配，PoW 请求头使用与浏览器 `btoa` 一致的标准 Base64。
+- 标准 OpenAI `tools` 请求默认启用工具选择，并兼容 DeepSeek 当前 JSON Patch/SSE 工具响应。
 - 对请求日志中的 Authorization、API Key 和 Cookie 等敏感请求头进行脱敏。
 - 增加 DeepSeek 模式、PoW、图片、流式及非流式响应的回归测试。
 
@@ -55,7 +56,7 @@ make build-linux
 ## 测试 / Test
 
 ```shell
-go test ./core/gin ./relay/llm/deepseek
+go test ./core/common/toolcall ./core/gin ./relay/llm/deepseek
 ```
 
 ## 配置与使用 / Configuration

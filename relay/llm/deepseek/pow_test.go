@@ -27,6 +27,12 @@ func TestDeepSeekHashV1Vectors(t *testing.T) {
 	}
 }
 
+func TestEncodeDeepSeekPoWPayloadUsesBrowserCompatibleBase64(t *testing.T) {
+	if got := encodeDeepSeekPoWPayload([]byte("a")); got != "YQ==" {
+		t.Fatalf("encodeDeepSeekPoWPayload() = %q, want padded browser-compatible base64", got)
+	}
+}
+
 func TestLocalPOWSolverWithRealChallenge(t *testing.T) {
 	answer, err := calcAnswer(context.Background(), map[string]interface{}{
 		"challenge":  "476138e5d25811cae449a34bbcae224c1a0df4f0933942a9191b42ac1017837e",
