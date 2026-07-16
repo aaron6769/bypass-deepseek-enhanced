@@ -36,6 +36,6 @@ RUN unzip bin.zip \
   && chmod +x server \
   && chmod +x bin/linux/helper
 
-ENV ARG "--port 8080"
+ENV ARG="--port 8080"
 CMD ["./server ${ARG}"]
 ENTRYPOINT ["sh", "-c"]
