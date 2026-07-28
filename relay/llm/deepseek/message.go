@@ -45,18 +45,24 @@ func readDeepSeekSSELine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
 func waitMessage(r *http.Response, cancel func(str string) bool) (content string, err error) {
 	defer r.Body.Close()
 	reader := bufio.NewReader(r.Body)
-	var dataBytes []byte
+	deepseekContentPatch := false
+	deepseekFragmentType := ""
 	for {
-		dataBytes, err = readDeepSeekSSELine(reader, maxDeepSeekSSELineBytes)
-		if err == io.EOF {
-			break
+		dataBytes, readErr := readDeepSeekSSELine(reader, maxDeepSeekSSELineBytes)
+		if readErr == io.EOF {
+			return content, nil
+		}
+		if readErr != nil {
+			return content, readErr
 		}
 
-		if err != nil {
-			return
+		if bytes.HasPrefix(dataBytes, []byte("event: ")) {
+			if string(bytes.TrimSpace(dataBytes[7:])) == "finish" {
+				return content, nil
+			}
+			continue
 		}
 
-		var res model.Response
 		if bytes.HasPrefix(dataBytes, []byte("data: ")) {
 			dataBytes = dataBytes[6:]
 		}
@@ -64,9 +70,54 @@ func waitMessage(r *http.Response, cancel func(str string) bool) (content string
 			continue
 		}
 
-		err = json.Unmarshal(dataBytes, &res)
-		if err != nil {
-			logger.Warn(err)
+		var patch map[string]interface{}
+		if json.Unmarshal(dataBytes, &patch) == nil {
+			path, hasPath := patch["p"].(string)
+			if hasPath {
+				deepseekContentPatch = isDeepSeekContentPatchPath(path)
+				if path == "response/status" && patch["v"] == "FINISHED" {
+					return content, nil
+				}
+			}
+
+			var fragmentDeltas []deepSeekFragmentDelta
+			if !hasPath {
+				fragmentDeltas = deepSeekSnapshotDeltas(patch["v"])
+				if len(fragmentDeltas) == 0 && deepseekContentPatch {
+					if value, ok := patch["v"].(string); ok {
+						fragmentDeltas = []deepSeekFragmentDelta{{Content: value, Type: deepseekFragmentType}}
+					}
+				}
+			} else if deepseekContentPatch {
+				if delta, ok := deepSeekContentPatchDelta(path, patch["v"], deepseekFragmentType); ok {
+					fragmentDeltas = []deepSeekFragmentDelta{delta}
+				}
+			} else if path == "response/fragments" && patch["o"] == "APPEND" {
+				fragmentDeltas = deepSeekFragmentDeltas(patch["v"])
+			} else if path == "response" && patch["o"] == "BATCH" {
+				fragmentDeltas = deepSeekBatchDeltas(patch["v"])
+			}
+
+			for _, delta := range fragmentDeltas {
+				if delta.Type != "" {
+					deepseekFragmentType = delta.Type
+				}
+				if delta.Content == "" || strings.EqualFold(deepseekFragmentType, "THINK") {
+					continue
+				}
+				content += delta.Content
+				if cancel != nil && cancel(content) {
+					return content, nil
+				}
+			}
+			if len(fragmentDeltas) > 0 {
+				continue
+			}
+		}
+
+		var res model.Response
+		if unmarshalErr := json.Unmarshal(dataBytes, &res); unmarshalErr != nil {
+			logger.Warn(unmarshalErr)
 			continue
 		}
 
@@ -75,10 +126,13 @@ func waitMessage(r *http.Response, cancel func(str string) bool) (content string
 		}
 
 		if res.Choices[0].FinishReason != nil && *res.Choices[0].FinishReason == "stop" {
-			break
+			return content, nil
 		}
 
 		delta := res.Choices[0].Delta
+		if delta == nil {
+			continue
+		}
 		if delta.Type == "thinking" {
 			continue
 		}
@@ -91,7 +145,6 @@ func waitMessage(r *http.Response, cancel func(str string) bool) (content string
 			return content, nil
 		}
 	}
-	return
 }
 
 func waitResponse(ctx *gin.Context, r *http.Response, sse bool) (content string) {

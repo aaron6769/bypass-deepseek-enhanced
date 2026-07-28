@@ -30,6 +30,13 @@ Changes maintained in this repository:
 - Upgraded the project and container build to Go 1.26.5 and refreshed vulnerable networking and cryptography dependencies.
 - Changed both Dockerfiles to build the checked-out enhanced source and added multi-platform GitHub Actions verification and publishing.
 
+## 2026-07-16 — DeepSeek live runtime compatibility
+
+- Changed DeepSeek PoW headers from unpadded raw Base64 to browser-compatible padded Base64, fixing intermittent `MISSING_HEADER` responses and vision uploads.
+- Enabled tool selection by default when a standard OpenAI Chat Completions request contains `tools`, while preserving `tool_choice: "none"` and explicit internal disable behavior.
+- Updated the DeepSeek tool-response reader for the current `event:` plus JSON Patch/SSE format, ignored thinking fragments during tool selection, and treated a normal stream EOF as success.
+- Added regression tests for PoW header encoding, standard tools activation, current tool SSE parsing, and THINK/RESPONSE separation.
+
 Local deployment scripts, credentials, runtime configuration, and environment-specific live-test helpers are intentionally excluded from the public repository.
 
 The upstream copyright and GPL-3.0 license remain in effect. Changes in this repository are distributed under the same license.

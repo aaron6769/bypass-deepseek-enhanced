@@ -29,7 +29,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Run adapter regression tests
-        run: go test ./core/gin ./relay/llm/deepseek
+        run: go test ./core/common/toolcall ./core/gin ./relay/llm/deepseek
 
   build-container:
     needs: verify

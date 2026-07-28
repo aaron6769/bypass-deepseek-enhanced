@@ -163,7 +163,11 @@ func createPoWResponse(ctx context.Context, connection deepSeekConnection, targe
 	if err != nil {
 		return "", err
 	}
-	return base64.RawStdEncoding.EncodeToString(payload), nil
+	return encodeDeepSeekPoWPayload(payload), nil
+}
+
+func encodeDeepSeekPoWPayload(payload []byte) string {
+	return base64.StdEncoding.EncodeToString(payload)
 }
 
 func shouldRetryDeepSeek(err error, retry int) bool {

@@ -27,10 +27,19 @@ var (
 )
 
 func NeedExec(ctx *gin.Context) bool {
+	completion := common.GetGinCompletion(ctx)
+	if toolChoice, ok := completion.ToolChoice.(string); ok && toolChoice == "none" {
+		return false
+	}
+
 	var tool = "-1"
 	{
 		t := common.GetGinToolValue(ctx)
-		if !t.Is("enabled", true) {
+		_, explicitlyConfigured := ctx.Get(vars.GinTool)
+		if explicitlyConfigured && !t.Is("enabled", true) {
+			return false
+		}
+		if !explicitlyConfigured && len(completion.Tools) == 0 {
 			return false
 		}
 
@@ -40,7 +49,6 @@ func NeedExec(ctx *gin.Context) bool {
 		}
 	}
 
-	completion := common.GetGinCompletion(ctx)
 	messageL := len(completion.Messages)
 	if messageL == 0 {
 		return false

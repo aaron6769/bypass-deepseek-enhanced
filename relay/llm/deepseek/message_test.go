@@ -216,6 +216,16 @@ func TestWaitResponseSeparatesThinkingFragmentsStream(t *testing.T) {
 	}
 }
 
+func TestWaitMessageParsesCurrentPatchSSEAndIgnoresThinking(t *testing.T) {
+	got, err := waitMessage(deepSeekThinkingTestResponse(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "FINAL_4" {
+		t.Fatalf("waitMessage() = %q, want %q", got, "FINAL_4")
+	}
+}
+
 func deepSeekThinkingTestResponse() *http.Response {
 	stream := strings.Join([]string{
 		"event: update_session",
