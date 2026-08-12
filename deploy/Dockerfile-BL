@@ -1,41 +1,61 @@
-FROM golang:1.26.5-alpine AS builder
+# syntax=docker/dockerfile:1.7
 
-WORKDIR /app
-RUN apk add --no-cache git make
+FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+RUN apk add --no-cache git
+WORKDIR /src
+
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-RUN make install
-RUN make build-linux
 
-FROM ubuntu:latest
+COPY . .
+RUN go install -ldflags="-s -w" -trimpath ./cmd/iocgo && \
+    CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
+    go build -toolexec iocgo -ldflags="-s -w" -trimpath -o /out/server main.go
+
+FROM ubuntu:24.04
+
+ARG BL_BIN_COMMIT=f27457314bd6e1f135c7f08988ef9521eda4905e
+ARG BL_BIN_SHA256=da63d5558d872e90b3a672ce57aded32e801b7168fdac98bf90216ed1020e771
+ARG DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
-COPY --from=builder /app/bin/linux/server ./server
 
-RUN apt update \
-  && apt-get install -y curl unzip wget gnupg2
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg unzip && \
+    install -d -m 0755 /etc/apt/keyrings && \
+    curl --fail --location --silent --show-error --retry 3 \
+      https://dl.google.com/linux/linux_signing_key.pub \
+      -o /tmp/google-linux-signing-key.pub && \
+    gpg --batch --dearmor --output /etc/apt/keyrings/google-chrome.gpg \
+      /tmp/google-linux-signing-key.pub && \
+    rm -f /tmp/google-linux-signing-key.pub && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+      > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends google-chrome-stable && \
+    rm -rf /var/lib/apt/lists/*
 
-# 下载过盾文件
-RUN curl -JLO https://raw.githubusercontent.com/bincooo/chatgpt-adapter/refs/heads/hel/bin.zip
-RUN echo -e 'server:\n  port: 8080' > ./config.yaml
+RUN curl --fail --location --silent --show-error --retry 3 \
+      "https://raw.githubusercontent.com/bincooo/chatgpt-adapter/${BL_BIN_COMMIT}/bin.zip" \
+      -o /tmp/bin.zip && \
+    echo "${BL_BIN_SHA256}  /tmp/bin.zip" | sha256sum --check --strict - && \
+    unzip -q /tmp/bin.zip 'bin/linux/helper' -d /app && \
+    rm -f /tmp/bin.zip && \
+    chmod 0755 /app/bin/linux/helper
 
-# Install google
-RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
-  && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
-  && apt-get update \
-  && apt-get install -y google-chrome-stable
+COPY --from=builder /out/server ./server
 
-# Install Edge
-#RUN wget -q -O - https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg >/dev/null \
-#    && echo "deb https://packages.microsoft.com/repos/edge stable main" >> /etc/apt/sources.list.d/microsoft-edge.list \
-#    && apt-get update -qqy \
-#    && apt-get -qqy --no-install-recommends install microsoft-edge-stable
+RUN printf 'server:\n  port: 8080\n' > ./config.yaml && \
+    useradd --system --create-home --home-dir /home/adapter --shell /usr/sbin/nologin adapter && \
+    chown -R adapter:adapter /app /home/adapter
 
-RUN unzip bin.zip \
-  && chmod +x server \
-  && chmod +x bin/linux/helper
+ENV HOME=/home/adapter
+USER adapter
+EXPOSE 8080
 
-ENV ARG="--port 8080"
-CMD ["./server ${ARG}"]
-ENTRYPOINT ["sh", "-c"]
+ENTRYPOINT ["./server"]
+CMD ["--port", "8080"]

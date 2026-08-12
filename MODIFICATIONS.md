@@ -37,6 +37,14 @@ Changes maintained in this repository:
 - Updated the DeepSeek tool-response reader for the current `event:` plus JSON Patch/SSE format, ignored thinking fragments during tool selection, and treated a normal stream EOF as success.
 - Added regression tests for PoW header encoding, standard tools activation, current tool SSE parsing, and THINK/RESPONSE separation.
 
+## 2026-08-12 — Browser container supply-chain hardening
+
+- Replaced the floating `ubuntu:latest` runtime with Ubuntu 24.04 and modernized the Google Chrome signing-key configuration.
+- Pinned the upstream browser helper archive to commit `f27457314bd6e1f135c7f08988ef9521eda4905e` and verify its SHA-256 digest before extraction.
+- Extract only the required Linux amd64 helper, remove package caches, and run the browser-enabled image as an unprivileged user.
+- Added a real linux/amd64 Buildx build for `Dockerfile-BL`, isolated build-cache scopes, and bounded Actions job runtimes.
+- Added Dependabot coverage, contribution guidance, and a security policy.
+
 Local deployment scripts, credentials, runtime configuration, and environment-specific live-test helpers are intentionally excluded from the public repository.
 
 The upstream copyright and GPL-3.0 license remain in effect. Changes in this repository are distributed under the same license.

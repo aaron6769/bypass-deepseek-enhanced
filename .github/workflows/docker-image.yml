@@ -16,6 +16,7 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -34,6 +35,7 @@ jobs:
   build-container:
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -54,6 +56,16 @@ jobs:
           context: .
           file: deploy/Dockerfile-BL
           call: check
+
+      - name: Build browser-enabled image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/Dockerfile-BL
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=browser-enabled
+          cache-to: type=gha,mode=max,scope=browser-enabled
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -84,7 +96,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=main
+          cache-to: type=gha,mode=max,scope=main
           provenance: true
           sbom: true
