@@ -16,7 +16,7 @@ RUN go install -ldflags="-s -w" -trimpath ./cmd/iocgo && \
     CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
     go build -toolexec iocgo -ldflags="-s -w" -trimpath -o /out/server main.go
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ARG BL_BIN_COMMIT=f27457314bd6e1f135c7f08988ef9521eda4905e
 ARG BL_BIN_SHA256=da63d5558d872e90b3a672ce57aded32e801b7168fdac98bf90216ed1020e771
