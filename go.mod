@@ -8,7 +8,7 @@ require (
 	github.com/bincooo/edge-api v1.0.4-0.20250211074233-37fe84649a9b
 	github.com/bincooo/emit.io v1.0.1-0.20250327152715-789fc5920a10
 	github.com/bincooo/you.com v0.0.0-20250205070606-666b6847729b
-	github.com/bogdanfinn/tls-client v1.8.0
+	github.com/bogdanfinn/tls-client v1.15.1
 	github.com/dlclark/regexp2 v1.11.4
 	github.com/eko/gocache/lib/v4 v4.1.6
 	github.com/eko/gocache/store/go_cache/v4 v4.2.2
@@ -35,15 +35,18 @@ replace github.com/samber/do/v2 v2.0.0-beta.7 => github.com/iocgo/do/v2 v2.0.0-p
 
 require (
 	github.com/RomiChan/websocket v1.4.3-0.20220227141055-9b2c6168c9c5 // indirect
-	github.com/andybalholm/brotli v1.1.1 // indirect
+	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/bdandy/go-errors v1.2.2 // indirect
+	github.com/bdandy/go-socks4 v1.2.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bincooo/go-annotation v0.0.0-20250715054007-ed92d574bb99 // indirect
-	github.com/bogdanfinn/fhttp v0.5.36 // indirect
-	github.com/bogdanfinn/utls v1.6.5 // indirect
+	github.com/bogdanfinn/fhttp v0.6.8 // indirect
+	github.com/bogdanfinn/quic-go-utls v1.0.9-utls // indirect
+	github.com/bogdanfinn/utls v1.7.7-barnius // indirect
+	github.com/bogdanfinn/websocket v1.5.5-barnius // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect
 	github.com/cloudwego/iasm v0.2.0 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
@@ -60,7 +63,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jonboulle/clockwork v0.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.17.11 // indirect
+	github.com/klauspost/compress v1.18.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lestrrat-go/strftime v1.1.0 // indirect
@@ -75,7 +78,7 @@ require (
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
-	github.com/quic-go/quic-go v0.59.1 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/samber/do/v2 v2.0.0-beta.7 // indirect
