@@ -16,7 +16,7 @@ RUN go install -ldflags="-s -w" -trimpath ./cmd/iocgo && \
     CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
     go build -toolexec iocgo -ldflags="-s -w" -trimpath -o /out/server main.go
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates && \
     addgroup -S adapter && adduser -S -G adapter adapter
