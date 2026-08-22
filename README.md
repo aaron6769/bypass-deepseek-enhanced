@@ -37,7 +37,7 @@ An enhanced DeepSeek Web API adapter based on [xllm-go/bypass](https://github.co
 
 ## 构建 / Build
 
-项目使用 Go 1.26.5，并沿用上游的 `iocgo` 构建流程。
+项目使用 Go 1.26.7，并沿用上游的 `iocgo` 构建流程。
 
 ```shell
 go install ./cmd/iocgo
