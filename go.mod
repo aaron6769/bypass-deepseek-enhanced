@@ -1,6 +1,6 @@
 module chatgpt-adapter
 
-go 1.26.5
+go 1.26.7
 
 require (
 	github.com/antonfisher/nested-logrus-formatter v1.3.1
