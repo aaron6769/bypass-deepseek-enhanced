@@ -2,7 +2,6 @@ package common
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -97,8 +96,6 @@ func GetIdleConnectOptions(env *env.Environment) (options []emit.OptionHelper) {
 			logger.Warnf("read expectContinueTimeout error: %v", value)
 		}
 	}
-
-	options = append(options, emit.TLSConfigHelper(&tls.Config{InsecureSkipVerify: true}))
 	return
 }
 

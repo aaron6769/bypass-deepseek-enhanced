@@ -11,8 +11,8 @@ require (
 	github.com/bogdanfinn/tls-client v1.8.0
 	github.com/dlclark/regexp2 v1.11.4
 	github.com/eko/gocache/lib/v4 v4.1.6
-	github.com/eko/gocache/store/go_cache/v4 v4.2.2
-	github.com/gabriel-vasile/mimetype v1.4.3
+	github.com/eko/gocache/store/go_cache/v4 v4.2.5
+	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/gin-gonic/gin v1.10.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/golang/protobuf v1.5.4
@@ -24,9 +24,9 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.19.0
 	github.com/wasmerio/wasmer-go v1.0.5-0.20250109124841-f09913d8a0be
-	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
-	golang.org/x/net v0.55.0
-	google.golang.org/protobuf v1.36.0
+	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9
+	golang.org/x/net v0.58.0
+	google.golang.org/protobuf v1.36.12
 )
 
 //github.com/iocgo/sdk v0.0.0-20241129021727-ca323c08f298 => ../sdk
@@ -96,12 +96,12 @@ require (
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/tools v0.48.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
