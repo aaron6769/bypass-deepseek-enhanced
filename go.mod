@@ -25,7 +25,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/wasmerio/wasmer-go v1.0.5-0.20250109124841-f09913d8a0be
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
-	golang.org/x/net v0.55.0
+	golang.org/x/net v0.58.0
 	google.golang.org/protobuf v1.36.12
 )
 
