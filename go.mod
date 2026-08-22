@@ -11,7 +11,7 @@ require (
 	github.com/bogdanfinn/tls-client v1.8.0
 	github.com/dlclark/regexp2 v1.11.4
 	github.com/eko/gocache/lib/v4 v4.1.6
-	github.com/eko/gocache/store/go_cache/v4 v4.2.2
+	github.com/eko/gocache/store/go_cache/v4 v4.2.5
 	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/gin-gonic/gin v1.10.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
@@ -24,7 +24,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.19.0
 	github.com/wasmerio/wasmer-go v1.0.5-0.20250109124841-f09913d8a0be
-	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
+	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9
 	golang.org/x/net v0.58.0
 	google.golang.org/protobuf v1.36.12
 )
