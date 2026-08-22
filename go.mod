@@ -26,7 +26,7 @@ require (
 	github.com/wasmerio/wasmer-go v1.0.5-0.20250109124841-f09913d8a0be
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/net v0.55.0
-	google.golang.org/protobuf v1.36.0
+	google.golang.org/protobuf v1.36.12
 )
 
 //github.com/iocgo/sdk v0.0.0-20241129021727-ca323c08f298 => ../sdk
