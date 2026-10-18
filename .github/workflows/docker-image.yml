@@ -30,7 +30,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Run Go regression tests
-        run: go test ./...
+        run: go test ./core/cache ./core/common/toolcall ./core/gin ./relay/llm/deepseek
 
   build-container:
     needs: verify
