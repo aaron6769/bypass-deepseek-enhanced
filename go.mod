@@ -9,7 +9,7 @@ require (
 	github.com/bincooo/emit.io v1.0.1-0.20250327152715-789fc5920a10
 	github.com/bincooo/you.com v0.0.0-20250205070606-666b6847729b
 	github.com/bogdanfinn/tls-client v1.8.0
-	github.com/dlclark/regexp2 v1.11.4
+	github.com/dlclark/regexp2 v1.12.0
 	github.com/eko/gocache/lib/v4 v4.1.6
 	github.com/eko/gocache/store/go_cache/v4 v4.2.5
 	github.com/gabriel-vasile/mimetype v1.4.15
