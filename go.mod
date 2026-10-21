@@ -11,7 +11,7 @@ require (
 	github.com/bogdanfinn/tls-client v1.8.0
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/eko/gocache/lib/v4 v4.4.0
-	github.com/eko/gocache/store/go_cache/v4 v4.2.5
+	github.com/eko/gocache/store/go_cache/v4 v4.2.10
 	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
