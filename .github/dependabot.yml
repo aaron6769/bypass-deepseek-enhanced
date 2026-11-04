@@ -17,3 +17,7 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Ubuntu 24.10 is end-of-life; retain the supported 24.04 LTS base.
+      - dependency-name: "ubuntu"
+        versions: ["24.10"]
